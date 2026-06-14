@@ -4,10 +4,9 @@
 -- =============================================================
 
 -- ------------------------------------------------------------
--- EXTENSIONES
+-- EXTENSIONES (pgcrypto ya existe en Supabase Cloud bajo schema extensions)
 -- ------------------------------------------------------------
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 
 -- ============================================================
@@ -15,7 +14,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- Cada fila representa un comercio/negocio independiente.
 -- ============================================================
 CREATE TABLE tenants (
-    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     nombre_comercio TEXT NOT NULL,
     rfc           VARCHAR(13),
     plan          VARCHAR(20) NOT NULL DEFAULT 'basico'
@@ -33,7 +32,7 @@ COMMENT ON TABLE tenants IS 'Comercios registrados en la plataforma SaaS.';
 -- PIN almacenado como hash (crypt + blowfish).
 -- ============================================================
 CREATE TABLE usuarios (
-    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     nombre        TEXT NOT NULL,
     email         TEXT,                        -- opcional para acceso web
@@ -55,7 +54,7 @@ COMMENT ON COLUMN usuarios.pin_hash
 -- Clasificación de productos por tenant.
 -- ============================================================
 CREATE TABLE categorias (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     nombre_categoria TEXT NOT NULL,
     color_hex       VARCHAR(7) DEFAULT '#6366f1',   -- para UI
@@ -73,7 +72,7 @@ CREATE INDEX idx_categorias_tenant ON categorias(tenant_id);
 -- Extiende con unidad de medida para kg/fracciones.
 -- ============================================================
 CREATE TABLE productos (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     categoria_id    UUID REFERENCES categorias(id) ON DELETE SET NULL,
 
@@ -115,7 +114,7 @@ COMMENT ON COLUMN productos.stock_actual
 -- Clientes por tenant, con soporte de crédito.
 -- ============================================================
 CREATE TABLE clientes (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     nombre          TEXT NOT NULL,
     telefono        VARCHAR(20),
@@ -134,7 +133,7 @@ CREATE INDEX idx_clientes_tenant ON clientes(tenant_id);
 -- Control de apertura/cierre de turno por cajero.
 -- ============================================================
 CREATE TABLE caja_turnos (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     usuario_id      UUID NOT NULL REFERENCES usuarios(id),
     monto_apertura  NUMERIC(12, 2) NOT NULL DEFAULT 0,
@@ -156,7 +155,7 @@ CREATE INDEX idx_caja_turnos_abierto ON caja_turnos(tenant_id)
 -- Encabezado de cada transacción de venta.
 -- ============================================================
 CREATE TABLE ventas (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     usuario_id      UUID NOT NULL REFERENCES usuarios(id),
     cliente_id      UUID REFERENCES clientes(id) ON DELETE SET NULL,
@@ -189,7 +188,7 @@ CREATE INDEX idx_ventas_cliente    ON ventas(cliente_id) WHERE cliente_id IS NOT
 -- Líneas de cada venta. El trigger descuenta stock aquí.
 -- ============================================================
 CREATE TABLE detalles_ventas (
-    id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     venta_id         UUID NOT NULL REFERENCES ventas(id) ON DELETE CASCADE,
     producto_id      UUID NOT NULL REFERENCES productos(id),
     cantidad         NUMERIC(12, 4) NOT NULL,
@@ -286,10 +285,10 @@ ALTER TABLE caja_turnos      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ventas           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE detalles_ventas  ENABLE ROW LEVEL SECURITY;
 
--- ---- Función helper: obtener tenant_id del JWT ----
+-- ---- Función helper: obtener tenant_id de la sesión ----
 -- El frontend debe incluir el tenant_id en app.tenant_id
 -- via: supabase.rpc o set_config en cada sesión.
-CREATE OR REPLACE FUNCTION auth.tenant_id()
+CREATE OR REPLACE FUNCTION public.get_tenant_id()
 RETURNS UUID
 LANGUAGE sql STABLE
 AS $$
@@ -302,61 +301,61 @@ $$;
 -- ---- Políticas: usuarios ----
 CREATE POLICY "usuarios: solo su tenant"
     ON usuarios
-    USING (tenant_id = auth.tenant_id());
+    USING (tenant_id = public.get_tenant_id());
 
 CREATE POLICY "usuarios: insertar en su tenant"
     ON usuarios FOR INSERT
-    WITH CHECK (tenant_id = auth.tenant_id());
+    WITH CHECK (tenant_id = public.get_tenant_id());
 
 -- ---- Políticas: categorias ----
 CREATE POLICY "categorias: solo su tenant"
     ON categorias
-    USING (tenant_id = auth.tenant_id());
+    USING (tenant_id = public.get_tenant_id());
 
 CREATE POLICY "categorias: insertar en su tenant"
     ON categorias FOR INSERT
-    WITH CHECK (tenant_id = auth.tenant_id());
+    WITH CHECK (tenant_id = public.get_tenant_id());
 
 -- ---- Políticas: productos ----
 CREATE POLICY "productos: solo su tenant"
     ON productos
-    USING (tenant_id = auth.tenant_id());
+    USING (tenant_id = public.get_tenant_id());
 
 CREATE POLICY "productos: insertar en su tenant"
     ON productos FOR INSERT
-    WITH CHECK (tenant_id = auth.tenant_id());
+    WITH CHECK (tenant_id = public.get_tenant_id());
 
 CREATE POLICY "productos: actualizar en su tenant"
     ON productos FOR UPDATE
-    USING (tenant_id = auth.tenant_id())
-    WITH CHECK (tenant_id = auth.tenant_id());
+    USING (tenant_id = public.get_tenant_id())
+    WITH CHECK (tenant_id = public.get_tenant_id());
 
 -- ---- Políticas: clientes ----
 CREATE POLICY "clientes: solo su tenant"
     ON clientes
-    USING (tenant_id = auth.tenant_id());
+    USING (tenant_id = public.get_tenant_id());
 
 CREATE POLICY "clientes: insertar en su tenant"
     ON clientes FOR INSERT
-    WITH CHECK (tenant_id = auth.tenant_id());
+    WITH CHECK (tenant_id = public.get_tenant_id());
 
 -- ---- Políticas: caja_turnos ----
 CREATE POLICY "caja_turnos: solo su tenant"
     ON caja_turnos
-    USING (tenant_id = auth.tenant_id());
+    USING (tenant_id = public.get_tenant_id());
 
 CREATE POLICY "caja_turnos: insertar en su tenant"
     ON caja_turnos FOR INSERT
-    WITH CHECK (tenant_id = auth.tenant_id());
+    WITH CHECK (tenant_id = public.get_tenant_id());
 
 -- ---- Políticas: ventas ----
 CREATE POLICY "ventas: solo su tenant"
     ON ventas
-    USING (tenant_id = auth.tenant_id());
+    USING (tenant_id = public.get_tenant_id());
 
 CREATE POLICY "ventas: insertar en su tenant"
     ON ventas FOR INSERT
-    WITH CHECK (tenant_id = auth.tenant_id());
+    WITH CHECK (tenant_id = public.get_tenant_id());
 
 -- ---- Políticas: detalles_ventas ----
 -- Acceso indirecto a través de la venta (JOIN con tenant_id)
@@ -366,7 +365,7 @@ CREATE POLICY "detalles_ventas: solo ventas de su tenant"
         EXISTS (
             SELECT 1 FROM ventas v
              WHERE v.id = venta_id
-               AND v.tenant_id = auth.tenant_id()
+               AND v.tenant_id = public.get_tenant_id()
         )
     );
 
@@ -376,14 +375,14 @@ CREATE POLICY "detalles_ventas: insertar en venta de su tenant"
         EXISTS (
             SELECT 1 FROM ventas v
              WHERE v.id = venta_id
-               AND v.tenant_id = auth.tenant_id()
+               AND v.tenant_id = public.get_tenant_id()
         )
     );
 
 -- ---- Políticas: tenants (solo el propio) ----
 CREATE POLICY "tenants: solo leer el propio"
     ON tenants FOR SELECT
-    USING (id = auth.tenant_id());
+    USING (id = public.get_tenant_id());
 
 
 -- ============================================================
@@ -576,13 +575,13 @@ BEGIN
     -- Admin
     INSERT INTO usuarios (tenant_id, nombre, rol, pin_hash)
     VALUES (v_tenant_id, 'Administrador', 'admin',
-            crypt('1234', gen_salt('bf')))
+            extensions.crypt('1234', extensions.gen_salt('bf')))
     RETURNING id INTO v_admin_id;
 
     -- Cajero
     INSERT INTO usuarios (tenant_id, nombre, rol, pin_hash)
     VALUES (v_tenant_id, 'Cajero 1', 'cajero',
-            crypt('5678', gen_salt('bf')));
+            extensions.crypt('5678', extensions.gen_salt('bf')));
 
     -- Categorías
     INSERT INTO categorias (tenant_id, nombre_categoria, color_hex)

@@ -23,6 +23,7 @@ export interface Producto {
   imagen_url: string | null
   activo: boolean
   nombre_categoria?: string | null
+  nombre_proveedor: string
 }
 
 export interface ItemCarrito {

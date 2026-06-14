@@ -17,20 +17,24 @@ export function useLowStockAlerts(tenantId: string) {
 
   // Carga inicial
   const fetchAlerts = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('productos_bajo_stock')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('nivel_alerta', { ascending: true })  // sin_stock primero
-
-    if (!error && data) {
-      setAlerts(data as ProductoBajoStock[])
+    try {
+      const res = await fetch(`/api/tenant/${tenantId}/alerts`)
+      if (res.ok) {
+        const data = await res.json()
+        setAlerts(data.alerts as ProductoBajoStock[])
+      }
+    } catch (err) {
+      console.error('Error cargando alertas:', err)
+    } finally {
+      setIsLoading(false)
     }
-    setIsLoading(false)
-  }, [supabase, tenantId])
+  }, [tenantId])
 
   useEffect(() => {
     fetchAlerts()
+
+    // Encuesta periódica cada 10 segundos como respaldo confiable RLS
+    const interval = setInterval(fetchAlerts, 10000)
 
     // Suscripción Realtime: escucha UPDATE en productos del tenant
     const channel = supabase
@@ -98,6 +102,7 @@ export function useLowStockAlerts(tenantId: string) {
       .subscribe()
 
     return () => {
+      clearInterval(interval)
       supabase.removeChannel(channel)
     }
   }, [supabase, tenantId, fetchAlerts])

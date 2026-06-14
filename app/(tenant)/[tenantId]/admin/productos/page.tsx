@@ -1,15 +1,15 @@
 // =============================================================
-//  app/(tenant)/[tenantId]/ventas/page.tsx
+//  app/(tenant)/[tenantId]/admin/productos/page.tsx
 //  Server Component wrapper — unwraps async params properly.
 // =============================================================
-import { VentasClient } from './VentasClient'
+import { ProductosClient } from './ProductosClient'
 
-interface VentasPageProps {
+interface ProductosPageProps {
   params: Promise<{ tenantId: string }>
 }
 
-export default async function VentasPage({ params }: VentasPageProps) {
+export default async function ProductosPage({ params }: ProductosPageProps) {
   const { tenantId } = await params
 
-  return <VentasClient tenantId={tenantId} />
+  return <ProductosClient tenantId={tenantId} />
 }
