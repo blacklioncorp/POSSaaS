@@ -13,11 +13,12 @@ import {
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Package, Save, Loader2,
-  TrendingUp, AlertTriangle,
+  TrendingUp, TrendingDown, AlertTriangle,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { AppNavBar } from '@/components/pos/AppNavBar'
-import type { Producto } from '@/types/pos.types'
+import type { Producto, HistorialPrecio } from '@/types/pos.types'
+import Link from 'next/link'
 
 interface Props { tenantId: string; productoId: string }
 
@@ -42,6 +43,7 @@ export function EditarProductoClient({ tenantId, productoId }: Props) {
 
   const [allProductos, setAllProductos] = useState<Producto[]>([])
   const [original, setOriginal] = useState<Producto | null>(null)
+  const [historial, setHistorial] = useState<HistorialPrecio[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -68,14 +70,16 @@ export function EditarProductoClient({ tenantId, productoId }: Props) {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const [{ data: prod }, { data: todos }] = await Promise.all([
+      const [{ data: prod }, { data: todos }, { data: hist }] = await Promise.all([
         supabase.from('productos').select('*').eq('id', productoId).eq('tenant_id', tenantId).single(),
         supabase.from('productos').select('*').eq('tenant_id', tenantId).eq('activo', true).order('descripcion'),
+        supabase.from('historial_precios').select('*').eq('producto_id', productoId).eq('tenant_id', tenantId).order('creado_en', { ascending: false }).limit(5),
       ])
 
       if (prod) {
         setOriginal(prod as Producto)
         setAllProductos((todos || []) as Producto[])
+        setHistorial((hist || []) as HistorialPrecio[])
         setForm({
           codigo_barras: prod.codigo_barras || '',
           descripcion: prod.descripcion || '',
@@ -421,6 +425,50 @@ export function EditarProductoClient({ tenantId, productoId }: Props) {
               <span className="text-sm text-zinc-500 mb-1">{form.unidad_medida}</span>
             </div>
             <p className="text-xs text-zinc-600">Mínimo: {form.stock_minimo || 0} {form.unidad_medida}</p>
+          </div>
+
+          {/* Historial de Precios Reciente */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Últimas Compras</p>
+            </div>
+            
+            {historial.length === 0 ? (
+              <p className="text-xs text-zinc-500 italic">No hay historial registrado.</p>
+            ) : (
+              <div className="space-y-2">
+                {historial.map((h, i) => {
+                  const diff = h.precio_anterior ? h.precio_compra - h.precio_anterior : 0;
+                  const pct = h.precio_anterior ? (Math.abs(diff) / h.precio_anterior) * 100 : 0;
+                  const date = new Date(h.creado_en).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' });
+                  
+                  return (
+                    <div key={h.id} className={`flex items-center justify-between text-xs py-1.5 ${i !== historial.length - 1 ? 'border-b border-zinc-800/50' : ''}`}>
+                      <div className="flex flex-col">
+                        <span className="text-zinc-300 font-medium">{date}</span>
+                        <span className="text-zinc-500 truncate max-w-[80px]">{h.nombre_proveedor}</span>
+                      </div>
+                      <div className="flex flex-col items-end">
+                        <span className="text-emerald-400 font-mono font-semibold">{formatMXN(h.precio_compra)}</span>
+                        {diff !== 0 && (
+                          <span className={`text-[10px] flex items-center gap-0.5 ${diff < 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                            {diff < 0 ? <TrendingDown className="h-2.5 w-2.5" /> : <TrendingUp className="h-2.5 w-2.5" />}
+                            {pct.toFixed(1)}%
+                          </span>
+                        )}
+                        {diff === 0 && <span className="text-[10px] text-zinc-600">—</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            
+            <div className="pt-2">
+              <Link href={`/${tenantId}/admin/historial-precios?producto=${productoId}`} className="text-xs text-amber-500 hover:text-amber-400 font-semibold transition-colors flex items-center gap-1">
+                Ver historial completo &rarr;
+              </Link>
+            </div>
           </div>
 
           {/* Shortcuts */}

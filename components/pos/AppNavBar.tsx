@@ -11,7 +11,7 @@
 import { useRouter } from 'next/navigation'
 import {
   Package, ShoppingCart, Warehouse, LayoutDashboard,
-  Users, ChevronRight, Store,
+  Users, ChevronRight, Store, TrendingDown
 } from 'lucide-react'
 
 export type NavSection =
@@ -20,6 +20,7 @@ export type NavSection =
   | 'inventario'
   | 'dashboard'
   | 'usuarios'
+  | 'historial-precios'
 
 interface NavItem {
   key: NavSection
@@ -72,6 +73,13 @@ const NAV_ITEMS: NavItem[] = [
     href: 'DYNAMIC',
   },
   {
+    key: 'historial-precios',
+    label: 'Historial de Precios',
+    shortLabel: 'Precios',
+    icon: <TrendingDown className="h-4 w-4" />,
+    href: 'DYNAMIC',
+  },
+  {
     key: 'usuarios',
     label: 'Usuarios',
     shortLabel: 'Usuarios',
@@ -87,6 +95,7 @@ function getHref(key: NavSection, tenantId: string): string {
     case 'inventario': return `/${tenantId}/admin/inventario`
     case 'dashboard':  return `/${tenantId}/dashboard`
     case 'usuarios':   return `/${tenantId}/admin/usuarios`
+    case 'historial-precios': return `/${tenantId}/admin/historial-precios`
   }
 }
 

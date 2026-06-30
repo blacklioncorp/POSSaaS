@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Box, Plus, Minus, Search, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Box, Plus, Minus, Search, CheckCircle2, TrendingDown, TrendingUp, Minus as MinusIcon } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { AppNavBar } from '@/components/pos/AppNavBar'
 import type { Producto } from '@/types/pos.types'
@@ -24,6 +24,8 @@ export function InventarioClient({ tenantId }: InventarioClientProps) {
   const [tipoMovimiento, setTipoMovimiento] = useState<'entrada' | 'salida'>('entrada')
   const [cantidad, setCantidad] = useState('')
   const [motivo, setMotivo] = useState('')
+  const [proveedor, setProveedor] = useState('')
+  const [costo, setCosto] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [successMsg, setSuccessMsg] = useState('')
 
@@ -50,6 +52,8 @@ export function InventarioClient({ tenantId }: InventarioClientProps) {
     setSelectedProduct(p)
     setCantidad('')
     setMotivo('')
+    setProveedor(p.nombre_proveedor || '')
+    setCosto(p.precio_compra.toString())
     setSuccessMsg('')
   }
 
@@ -75,10 +79,21 @@ export function InventarioClient({ tenantId }: InventarioClientProps) {
       return
     }
 
-    // 1. Update Product Stock
+    // 1. Update Product Stock (and cost/provider if entry)
+    let updateData: any = { stock_actual: stock_nuevo }
+    if (tipoMovimiento === 'entrada') {
+      const numCosto = Number(costo)
+      if (!isNaN(numCosto) && numCosto > 0) {
+        updateData.precio_compra = numCosto
+      }
+      if (proveedor.trim()) {
+        updateData.nombre_proveedor = proveedor.trim()
+      }
+    }
+
     const { error: updateError } = await supabase
       .from('productos')
-      .update({ stock_actual: stock_nuevo })
+      .update(updateData)
       .eq('id', selectedProduct.id)
       .eq('tenant_id', tenantId)
 
@@ -103,14 +118,56 @@ export function InventarioClient({ tenantId }: InventarioClientProps) {
         motivo: motivo || (tipoMovimiento === 'entrada' ? 'Ingreso manual' : 'Salida manual')
       }])
 
+    // 3. Insert into historial_precios if it's an entry
+    if (tipoMovimiento === 'entrada') {
+      const numCosto = Number(costo)
+      if (!isNaN(numCosto) && numCosto > 0) {
+        await supabase
+          .from('historial_precios')
+          .insert([{
+            tenant_id: tenantId,
+            producto_id: selectedProduct.id,
+            nombre_proveedor: proveedor.trim() || 'Sin Proveedor',
+            precio_compra: numCosto,
+            precio_anterior: selectedProduct.precio_compra,
+            cantidad: numCantidad,
+            notas: motivo || 'Ingreso de inventario'
+          }])
+      }
+    }
+
     // Update local state
-    const updatedProduct = { ...selectedProduct, stock_actual: stock_nuevo }
+    const updatedProduct = { 
+      ...selectedProduct, 
+      stock_actual: stock_nuevo,
+      ...(tipoMovimiento === 'entrada' ? {
+        precio_compra: !isNaN(Number(costo)) && Number(costo) > 0 ? Number(costo) : selectedProduct.precio_compra,
+        nombre_proveedor: proveedor.trim() || selectedProduct.nombre_proveedor
+      } : {})
+    }
     setSelectedProduct(null)
     setProductos(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p))
     setSuccessMsg(`¡Stock actualizado! Nuevo stock de ${updatedProduct.descripcion}: ${stock_nuevo} ${updatedProduct.unidad_medida}`)
     
     setIsSubmitting(false)
   }
+
+  // --- Computed Values for Price Change and Margins ---
+  const numCostoInput = Number(costo) || 0
+  const costoAnterior = selectedProduct ? Number(selectedProduct.precio_compra) : 0
+  const diffCosto = numCostoInput - costoAnterior
+  const percentDiffCosto = costoAnterior > 0 ? (Math.abs(diffCosto) / costoAnterior) * 100 : 0
+  
+  // Calculate original margin
+  const precioVentaActual = selectedProduct ? Number(selectedProduct.precio_venta) : 0
+  const gananciaActual = precioVentaActual - costoAnterior
+  const margenActualPorcentaje = costoAnterior > 0 ? (gananciaActual / costoAnterior) * 100 : 0
+
+  // Suggested selling price to maintain margin
+  const suggestedVenta = numCostoInput > 0 ? numCostoInput * (1 + (margenActualPorcentaje / 100)) : 0
+  
+  const formatMXN = (n: number) =>
+    new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n)
 
   const filteredProductos = productos.filter(p => 
     p.descripcion.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -241,6 +298,60 @@ export function InventarioClient({ tenantId }: InventarioClientProps) {
                     placeholder="Ej. 50"
                   />
                 </div>
+
+                {tipoMovimiento === 'entrada' && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-sm font-semibold text-zinc-400">Proveedor</label>
+                        <input
+                          type="text"
+                          required={tipoMovimiento === 'entrada'}
+                          value={proveedor}
+                          onChange={(e) => setProveedor(e.target.value)}
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm focus:border-emerald-500 focus:outline-none"
+                          placeholder="Nombre del proveedor"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-sm font-semibold text-zinc-400">Costo de compra ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          required={tipoMovimiento === 'entrada'}
+                          value={costo}
+                          onChange={(e) => setCosto(e.target.value)}
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm font-mono focus:border-emerald-500 focus:outline-none"
+                          placeholder="Costo unitario"
+                        />
+                        {/* Indicador de variación de precio */}
+                        {costo && numCostoInput !== costoAnterior && (
+                          <div className={`flex items-center gap-1 text-xs mt-1 font-semibold ${diffCosto < 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {diffCosto < 0 ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
+                            <span>{Math.abs(diffCosto).toFixed(2)} ({percentDiffCosto.toFixed(1)}%) {diffCosto < 0 ? 'más barato' : 'más caro'} que el actual ({formatMXN(costoAnterior)})</span>
+                          </div>
+                        )}
+                        {costo && numCostoInput === costoAnterior && (
+                          <div className="flex items-center gap-1 text-xs mt-1 text-zinc-500">
+                            <MinusIcon className="h-3 w-3" />
+                            <span>Sin cambio vs actual</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {/* Sugerencia de precio de venta */}
+                    {diffCosto !== 0 && numCostoInput > 0 && margenActualPorcentaje > 0 && (
+                      <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-3 text-sm text-blue-200">
+                        <p>
+                          <strong>Sugerencia de venta:</strong> Para mantener tu margen actual del <strong>{margenActualPorcentaje.toFixed(1)}%</strong>, 
+                          el nuevo precio de venta debería ser <strong>{formatMXN(suggestedVenta)}</strong> (actual: {formatMXN(precioVentaActual)}). 
+                          <span className="text-blue-400 text-xs block mt-1">Puedes actualizarlo después en la sección de Productos.</span>
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
 
                 <div className="space-y-1">
                   <label className="text-sm font-semibold text-zinc-400">Motivo / Notas (Opcional)</label>

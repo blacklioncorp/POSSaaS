@@ -13,10 +13,11 @@ import { SearchModal }   from '@/components/pos/SearchModal'
 import { TicketPrint }   from '@/components/pos/TicketPrint'
 import { AppNavBar }     from '@/components/pos/AppNavBar'
 import type {
-  PagoPayload, VentaResult, Cliente, Usuario
+  PagoPayload, VentaResult, Cliente, Usuario, Producto
 } from '@/types/pos.types'
 import { KeyRound, LogOut } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 
 interface VentasClientProps {
   tenantId: string
@@ -74,6 +75,13 @@ export function VentasClient({ tenantId }: VentasClientProps) {
   const [descInput, setDescInput] = useState('')
 
   const [, startTransition] = useTransition()
+
+  // ── Autocomplete (Predictivo) ──
+  const [autoResults, setAutoResults] = useState<Producto[]>([])
+  const [showAuto, setShowAuto] = useState(false)
+  const [autoIdx, setAutoIdx] = useState(0)
+  const autoDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const supabase = createClient(tenantId)
 
   // ── Cargar operadores y clientes al montar ──
   useEffect(() => {
@@ -269,6 +277,56 @@ export function VentasClient({ tenantId }: VentasClientProps) {
   }, [nextTab, eliminarItem, selectedItemIdx, activeTab.items, refocusScanner, activeShift, activeUser])
 
   // ── Handler del scanner ──
+  const handleScanChange = (val: string) => {
+    setScanVal(val)
+    setShowAuto(false)
+    
+    if (!val.trim()) {
+      setAutoResults([])
+      return
+    }
+
+    if (autoDebounce.current) clearTimeout(autoDebounce.current)
+    autoDebounce.current = setTimeout(async () => {
+      try {
+        const { data } = await supabase.rpc('buscar_producto_pos', {
+          p_tenant_id: tenantId,
+          p_query: val,
+          p_limit: 8,
+        })
+        if (data && data.length > 0) {
+          setAutoResults(data as Producto[])
+          setAutoIdx(0)
+          setShowAuto(true)
+        }
+      } catch(e) {}
+    }, 250)
+  }
+
+  const handleScannerKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (showAuto && autoResults.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setAutoIdx(i => Math.min(i + 1, autoResults.length - 1))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setAutoIdx(i => Math.max(i - 1, 0))
+      } else if (e.key === 'Enter') {
+        e.preventDefault()
+        const p = autoResults[autoIdx]
+        if (p) {
+          startTransition(() => agregarItem(p))
+          setScanVal('')
+          setShowAuto(false)
+          setAutoResults([])
+          refocusScanner()
+        }
+      } else if (e.key === 'Escape') {
+        setShowAuto(false)
+      }
+    }
+  }
+
   const handleScanSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!activeShift) {
@@ -400,7 +458,7 @@ export function VentasClient({ tenantId }: VentasClientProps) {
         </div>
 
         {/* Scanner input */}
-        <form onSubmit={handleScanSubmit} className="flex-1 max-w-sm">
+        <form onSubmit={handleScanSubmit} className="flex-1 max-w-sm relative">
           <div className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 transition-all ${
             scanFlash === 'ok'    ? 'border-emerald-500 bg-emerald-950' :
             scanFlash === 'error' ? 'border-red-500 bg-red-950' :
@@ -411,9 +469,10 @@ export function VentasClient({ tenantId }: VentasClientProps) {
               ref={scannerRef}
               type="text"
               value={scanVal}
-              onChange={e => setScanVal(e.target.value)}
+              onChange={e => handleScanChange(e.target.value)}
+              onKeyDown={handleScannerKeyDown}
               onClick={e => e.stopPropagation()}
-              placeholder={activeShift ? "Escanear código de barras..." : "⚠️ DEBES ABRIR CAJA F5"}
+              placeholder={activeShift ? "Escanear código de barras o teclear..." : "⚠️ DEBES ABRIR CAJA F5"}
               autoComplete="off"
               className="flex-1 bg-transparent text-sm text-white placeholder-zinc-600 focus:outline-none"
             />
@@ -421,6 +480,36 @@ export function VentasClient({ tenantId }: VentasClientProps) {
               <span className="text-xs text-zinc-500 animate-pulse">...</span>
             )}
           </div>
+
+          {/* Predictive Search Dropdown */}
+          {showAuto && autoResults.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+              {autoResults.map((p, i) => (
+                <div
+                  key={p.id}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    startTransition(() => agregarItem(p))
+                    setScanVal('')
+                    setShowAuto(false)
+                    setAutoResults([])
+                    refocusScanner()
+                  }}
+                  className={`px-3 py-2.5 cursor-pointer flex items-center justify-between text-sm transition-colors ${
+                    i === autoIdx ? 'bg-emerald-500/20 text-emerald-400' : 'text-zinc-300 hover:bg-zinc-800'
+                  }`}
+                >
+                  <div className="truncate pr-4 flex-1">
+                    <span className="font-medium">{p.descripcion}</span>
+                    {p.codigo_barras && <span className="text-xs text-zinc-500 ml-2 font-mono">{p.codigo_barras}</span>}
+                  </div>
+                  <div className="font-semibold tabular-nums shrink-0">
+                    {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(p.precio_venta)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </form>
 
       </header>

@@ -83,3 +83,16 @@ export interface VentaResult {
   total: number
   cambio: number
 }
+
+export interface HistorialPrecio {
+  id: string
+  tenant_id: string
+  producto_id: string
+  nombre_proveedor: string
+  precio_compra: number
+  precio_anterior: number | null
+  cantidad: number
+  notas: string | null
+  creado_en: string
+  descripcion_producto?: string
+}
