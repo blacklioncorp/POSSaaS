@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { 
   Users, Plus, Pencil, ShieldAlert, Shield, 
-  UserSquare, Save, X, Loader2 
+  UserSquare, Save, X, Loader2, Trash2
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { AppNavBar } from '@/components/pos/AppNavBar'
@@ -110,6 +110,44 @@ export function UsuariosClient({ tenantId }: UsuariosClientProps) {
     }
   }
 
+  const handleDelete = async (usuario: Usuario) => {
+    if (!confirm(`¿Estás seguro de eliminar el usuario "${usuario.nombre}"?\nEsta acción no se puede deshacer.`)) return
+
+    try {
+      // Intentar borrado completo (hard delete)
+      const { error } = await supabase
+        .from('usuarios')
+        .delete()
+        .eq('id', usuario.id)
+        .eq('tenant_id', tenantId)
+
+      if (error) {
+        // Si viola llave foránea (el cajero ya tiene ventas registradas), 
+        // desactivamos el perfil para no romper el historial.
+        if (error.code === '23503' || error.message.includes('violates foreign key constraint')) {
+          alert(`No se puede eliminar completamente a ${usuario.nombre} porque ya tiene tickets o turnos registrados en el sistema.\n\nSe ha desactivado su perfil para evitar que inicie sesión.`)
+          
+          const { error: updErr } = await supabase.rpc('actualizar_usuario_pos', {
+            p_usuario_id: usuario.id,
+            p_tenant_id: tenantId,
+            p_nombre: usuario.nombre,
+            p_rol: usuario.rol,
+            p_pin: null, // No cambiamos el PIN
+            p_activo: false
+          })
+          if (updErr) throw updErr
+        } else {
+          throw error
+        }
+      }
+      
+      fetchUsuarios()
+    } catch (err: any) {
+      console.error(err)
+      alert("Error al eliminar el usuario: " + err.message)
+    }
+  }
+
   const getRolBadge = (rol: RolUsuario) => {
     switch(rol) {
       case 'admin': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-rose-500/10 text-rose-500 border border-rose-500/20"><ShieldAlert className="w-3 h-3"/> Administrador</span>
@@ -196,13 +234,22 @@ export function UsuariosClient({ tenantId }: UsuariosClientProps) {
                         {u.creado_en ? new Date(u.creado_en).toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: 'numeric'}) : '--'}
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() => openModal(u)}
-                          className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-lg transition-colors inline-flex"
-                          title="Editar usuario"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => openModal(u)}
+                            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-lg transition-colors inline-flex"
+                            title="Editar usuario"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(u)}
+                            className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors inline-flex"
+                            title="Eliminar usuario"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))

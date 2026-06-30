@@ -8,10 +8,12 @@
 // =============================================================
 'use client'
 
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Package, ShoppingCart, Warehouse, LayoutDashboard,
-  Users, ChevronRight, Store, TrendingDown
+  Users, ChevronRight, Store, TrendingDown,
+  LogOut, History
 } from 'lucide-react'
 
 export type NavSection =
@@ -21,6 +23,7 @@ export type NavSection =
   | 'dashboard'
   | 'usuarios'
   | 'historial-precios'
+  | 'historial-ventas'
 
 interface NavItem {
   key: NavSection
@@ -80,6 +83,13 @@ const NAV_ITEMS: NavItem[] = [
     href: 'DYNAMIC',
   },
   {
+    key: 'historial-ventas',
+    label: 'Historial de Ventas',
+    shortLabel: 'Ventas (H)',
+    icon: <History className="h-4 w-4" />,
+    href: 'DYNAMIC',
+  },
+  {
     key: 'usuarios',
     label: 'Usuarios',
     shortLabel: 'Usuarios',
@@ -96,6 +106,7 @@ function getHref(key: NavSection, tenantId: string): string {
     case 'dashboard':  return `/${tenantId}/dashboard`
     case 'usuarios':   return `/${tenantId}/admin/usuarios`
     case 'historial-precios': return `/${tenantId}/admin/historial-precios`
+    case 'historial-ventas':  return `/${tenantId}/admin/historial-ventas`
   }
 }
 
@@ -103,13 +114,32 @@ export function AppNavBar({
   tenantId,
   activeSection,
   compact = false,
-  userName,
-  userRole,
+  userName: initialUserName,
+  userRole: initialUserRole,
   rightSlot,
 }: AppNavBarProps) {
   const router = useRouter()
+  const [session, setSession] = useState<{ nombre: string, rol: string } | null>(null)
+
+  useEffect(() => {
+    fetch('/api/auth/session')
+      .then(res => res.json())
+      .then(data => {
+        if (data.authenticated && data.user) {
+          setSession(data.user)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    router.push(`/${tenantId}/login`)
+  }
 
   const py = compact ? 'py-1.5' : 'py-2.5'
+  const displayUserName = session?.nombre || initialUserName
+  const displayUserRole = session?.rol || initialUserRole
 
   return (
     <nav
@@ -139,7 +169,17 @@ export function AppNavBar({
 
       {/* ── Nav Items ── */}
       <div className="flex items-center gap-0.5 flex-1">
-        {NAV_ITEMS.map((item) => {
+        {NAV_ITEMS.filter(item => {
+          if (!session) return true // Show all if session not loaded yet, middleware handles security
+          if (session.rol === 'admin') return true
+          if (session.rol === 'supervisor') {
+            return ['ventas', 'inventario', 'historial-precios', 'historial-ventas'].includes(item.key)
+          }
+          if (session.rol === 'cajero') {
+            return item.key === 'ventas'
+          }
+          return false
+        }).map((item) => {
           const href = getHref(item.key, tenantId)
           const isActive = activeSection === item.key
 
@@ -172,20 +212,34 @@ export function AppNavBar({
       {rightSlot ? (
         <div className="flex items-center gap-2 ml-auto">
           {rightSlot}
+          <button onClick={handleLogout} className="ml-2 p-1.5 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors" title="Cerrar sesión">
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
-      ) : userName ? (
-        <div className="ml-auto flex items-center gap-2 pl-3 border-l border-zinc-800">
-          <div className="flex items-center justify-center h-7 w-7 rounded-full bg-zinc-800 text-xs font-bold text-emerald-400 uppercase">
-            {userName.charAt(0)}
+      ) : displayUserName ? (
+        <div className="ml-auto flex items-center gap-3 pl-3 border-l border-zinc-800">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center justify-center h-7 w-7 rounded-full bg-zinc-800 text-xs font-bold text-emerald-400 uppercase">
+              {displayUserName.charAt(0)}
+            </div>
+            <div className="hidden sm:flex flex-col items-start leading-none">
+              <span className="text-xs font-semibold text-zinc-300">{displayUserName}</span>
+              {displayUserRole && (
+                <span className="text-[10px] text-zinc-600 capitalize">{displayUserRole}</span>
+              )}
+            </div>
           </div>
-          <div className="hidden sm:flex flex-col items-start leading-none">
-            <span className="text-xs font-semibold text-zinc-300">{userName}</span>
-            {userRole && (
-              <span className="text-[10px] text-zinc-600 capitalize">{userRole}</span>
-            )}
-          </div>
+          <button onClick={handleLogout} className="p-1.5 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors" title="Cerrar sesión">
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
-      ) : null}
+      ) : (
+        <div className="ml-auto">
+          <button onClick={handleLogout} className="p-1.5 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors" title="Cerrar sesión">
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      )}
     </nav>
   )
 }

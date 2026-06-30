@@ -29,7 +29,7 @@ export function VentasClient({ tenantId }: VentasClientProps) {
   const router = useRouter()
 
   // ── Operadores y Clientes ──────────────────────────────────
-  const [operadores, setOperadores] = useState<Usuario[]>([])
+
   const [activeUser, setActiveUser] = useState<Usuario | null>(null)
   const [clientes, setClientes] = useState<Cliente[]>([])
 
@@ -87,16 +87,21 @@ export function VentasClient({ tenantId }: VentasClientProps) {
   useEffect(() => {
     async function loadInitialData() {
       try {
-        const [resUsers, resClients] = await Promise.all([
-          fetch(`/api/tenant/${tenantId}/usuarios`),
+        const [resSession, resClients] = await Promise.all([
+          fetch('/api/auth/session'),
           fetch(`/api/tenant/${tenantId}/clientes`),
         ])
         
-        if (resUsers.ok) {
-          const data = await resUsers.json()
-          setOperadores(data.usuarios)
-          if (data.usuarios.length > 0) {
-            setActiveUser(data.usuarios[0])
+        if (resSession.ok) {
+          const data = await resSession.json()
+          if (data.authenticated && data.user) {
+            setActiveUser({
+              id: data.user.userId,
+              nombre: data.user.nombre,
+              rol: data.user.rol,
+              tenant_id: data.user.tenantId,
+              activo: true
+            })
           }
         }
         
@@ -397,23 +402,11 @@ export function VentasClient({ tenantId }: VentasClientProps) {
               <Kbd k="F4" label="Desc." />
               <Kbd k="F5" label="Turno" />
             </div>
-            {/* Operator selector */}
-            <div className="flex flex-col items-end text-xs">
-              <select
-                value={activeUser?.id || ''}
-                onChange={(e) => {
-                  const found = operadores.find(o => o.id === e.target.value)
-                  if (found) setActiveUser(found)
-                }}
-                onClick={e => e.stopPropagation()}
-                className="bg-transparent border border-zinc-700 rounded px-2 py-0.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500"
-              >
-                {operadores.map(op => (
-                  <option key={op.id} value={op.id} className="bg-zinc-900 text-white">
-                    {op.nombre} ({op.rol})
-                  </option>
-                ))}
-              </select>
+            {/* Operator status */}
+            <div className="flex flex-col items-end text-xs mr-2">
+              <span className="font-semibold text-zinc-300">
+                {activeUser?.nombre || 'Cargando...'}
+              </span>
               {activeShift ? (
                 <span className="text-[10px] text-emerald-400 mt-0.5 font-semibold">Caja Abierta</span>
               ) : (
