@@ -67,6 +67,8 @@ export interface Usuario {
   tenant_id: string
   nombre: string
   rol: RolUsuario
+  activo?: boolean
+  creado_en?: string
 }
 
 export interface PagoPayload {
